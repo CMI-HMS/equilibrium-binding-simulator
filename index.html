@@ -218,7 +218,29 @@ input:focus,select:focus{outline:2px solid var(--ink);outline-offset:-1px;border
 .scaletog button[aria-pressed="true"]{background:var(--on);color:var(--surface)}
 .scaletog button:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
 /* centred, so the width the 2:1 cap gives back reads as margin either side */
+.plotbox{position:relative}
 svg.plot{display:block;width:100%;height:auto;margin-inline:auto}
+svg.plot:focus-visible{outline:2px solid var(--ink);outline-offset:2px;border-radius:4px}
+/* hover readout: what every curve predicts at the concentration under the pointer */
+#hoverlayer{pointer-events:none}
+.hair{stroke:var(--axis);stroke-width:1;stroke-dasharray:4 4;opacity:.8}
+.hdot{fill:var(--surface);stroke-width:2.2}
+.tip{position:absolute;z-index:3;pointer-events:none;
+  background:color-mix(in srgb, var(--surface) 82%, transparent);
+  -webkit-backdrop-filter:blur(7px);backdrop-filter:blur(7px);
+  border:1px solid var(--line);border-radius:9px;padding:6px 9px 7px;
+  box-shadow:0 6px 20px rgba(0,0,0,.16);white-space:nowrap}
+.tip-x{font-family:var(--mono);font-size:12px;color:var(--ink-2);
+  padding-bottom:4px;margin-bottom:4px;border-bottom:1px solid var(--line)}
+/* one grid for every row, so the keys, names and numbers line up as columns */
+.tip-rows{display:grid;grid-template-columns:auto auto auto;gap:3px 10px;align-items:center}
+.tip-k{width:16px;height:0;border-top:3px solid var(--muted);display:inline-block}
+.tip-k.dotted{border-top-style:dotted}
+.tip-n{font-size:12px;color:var(--ink-2)}
+/* the reader has the series and wants the number, so the number carries the ink */
+.tip-v{font-family:var(--mono);font-size:12.5px;font-weight:600;color:var(--ink);
+  text-align:right;font-variant-numeric:tabular-nums}
+.tip-none{font-size:12px;color:var(--muted)}
 /* Chart chrome reads as a hierarchy: faint grid, a structural axis line at
    ~3.5:1, tick numbers as real text at ~9:1, and the axis title in full ink. */
 .gridline{stroke:var(--grid);stroke-width:1}
@@ -417,7 +439,11 @@ footer a:focus-visible{outline:2px solid var(--ink);outline-offset:2px;border-ra
         </div>
       </div>
 
-      <svg class="plot" id="plot" viewBox="0 0 860 380" role="img" aria-label="Simulated binding data with fitted curves"></svg>
+      <div class="plotbox">
+        <svg class="plot" id="plot" viewBox="0 0 860 380" tabindex="0"
+             role="img" aria-label="Simulated binding data with fitted curves. Hover the plot, or focus it and use the arrow keys, to read what every fitted curve predicts at one concentration."></svg>
+        <div class="tip" id="tip" role="status" aria-live="polite" hidden></div>
+      </div>
 
       <div class="legendrow">
         <div class="legend" id="legend"></div>
@@ -1124,7 +1150,168 @@ function draw(){
   });
 
   document.getElementById('plot').innerHTML = s;
+  hideTip();
 }
+
+/* ---------------- hover readout ---------------- */
+
+// What each fitted curve predicts at one concentration. The pointer picks a
+// concentration; every active model answers for it, so nothing has to be
+// aimed at a 3px line. The readout only restates what the curves already draw
+// and the table already holds - it is a convenience, never the only way in.
+
+var hoverAt = null;   // x of the hairline in plot coordinates, kept for the keyboard
+
+function domainNow(){ return state.scale === 'log' ? cache.d : [0, cache.d[1]]; }
+
+// plot coordinate -> concentration, the inverse of sx within the axes
+function xOfPixel(ux, d){
+  var t = (ux - M.l) / (W - M.l - M.r);
+  t = Math.max(0, Math.min(1, t));
+  return state.scale === 'log'
+    ? Math.pow(10, Math.log10(d[0]) + t * (Math.log10(d[1]) - Math.log10(d[0])))
+    : d[0] + t * (d[1] - d[0]);
+}
+
+function clearMarks(){
+  var g = document.getElementById('hoverlayer');
+  if (g && g.parentNode) g.parentNode.removeChild(g);
+}
+function hideTip(){
+  var t = document.getElementById('tip');
+  if (t) t.hidden = true;
+  clearMarks();
+  hoverAt = null;
+}
+
+// value of one fitted curve at x, the same expression the curve is drawn from
+function predict(g, f, x){
+  var pt = Math.max(0, num(g.L.pt, 0)), B = num(f.B, 1);
+  return B * (f.model === 'quadratic' ? boundFrac(pt, x, f.kHalf, 1) : thetaHill(x, f.kHalf, f.n));
+}
+
+// ux is a position on the x axis in plot coordinates - any position, not only
+// the concentrations that were titrated: every curve is defined everywhere.
+function showTipAt(ux){
+  var svg = document.getElementById('plot'), tip = document.getElementById('tip');
+  var box = document.querySelector('.plotbox');
+  if (!cache || !cache.groups.length || !svg || !tip){ hideTip(); return; }
+  ux = Math.max(M.l, Math.min(W - M.r, ux));
+  hoverAt = ux;
+  var d = domainNow(), x = xOfPixel(ux, d);
+  if (!isFinite(x)){ hideTip(); return; }
+
+  // marks in the plot, in the plot's own coordinates
+  var marks = '<line class="hair" x1="' + ux.toFixed(2) + '" y1="' + M.t + '" x2="' + ux.toFixed(2) +
+              '" y2="' + (H - M.b) + '"/>';
+  var rows = [];
+  cache.groups.forEach(function(g){
+    var gc = col(g.idx % 3);
+    g.fits.forEach(function(f){
+      var y = predict(g, f, x);
+      if (!isFinite(y)) return;
+      // hollow, so the curve and any data point under it stay readable
+      marks += '<circle class="hdot" cx="' + ux.toFixed(2) + '" cy="' + sy(y).toFixed(2) +
+               '" r="5" stroke="' + gc + '"/>';
+      rows.push({ name: g.name, model: f.model, colour: gc, y: y });
+    });
+  });
+  clearMarks();
+  var layer = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+  layer.setAttribute('id', 'hoverlayer');
+  layer.innerHTML = marks;
+  svg.appendChild(layer);
+
+  // the readout itself. Ligand names are typed by the reader, so they are set
+  // as text, never as markup.
+  tip.textContent = '';
+  var head = document.createElement('div');
+  head.className = 'tip-x';
+  head.textContent = '[L]ₜ  ' + fmt(x, 3) + ' ' + state.unit;
+  tip.appendChild(head);
+  if (!rows.length){
+    var none = document.createElement('div');
+    none.className = 'tip-none';
+    none.textContent = 'no model selected';
+    tip.appendChild(none);
+  } else {
+    var wrap = document.createElement('div');
+    wrap.className = 'tip-rows';
+    rows.forEach(function(r){
+      var key = document.createElement('i');
+      key.className = 'tip-k' + (r.model === 'specific' ? ' dotted' : '');
+      key.style.borderTopColor = r.colour;
+      var nm = document.createElement('span');
+      nm.className = 'tip-n';
+      nm.textContent = r.name + ' · ' +
+        (r.model === 'quadratic' ? 'quadratic' : specificName('short'));
+      var val = document.createElement('span');
+      val.className = 'tip-v';
+      val.textContent = r.y.toFixed(3);
+      wrap.appendChild(key); wrap.appendChild(nm); wrap.appendChild(val);
+    });
+    tip.appendChild(wrap);
+  }
+  tip.hidden = false;
+
+  // place it beside the hairline, inside the plot, flipping before it overflows
+  var sr = svg.getBoundingClientRect(), br = box.getBoundingClientRect();
+  var scale = sr.width / W;
+  var px = (sr.left - br.left) + ux * scale;
+  var left = px + 14;
+  if (left + tip.offsetWidth > (sr.left - br.left) + sr.width - 4){
+    left = px - 14 - tip.offsetWidth;
+  }
+  left = Math.max(sr.left - br.left + 4, left);
+  var top = (sr.top - br.top) + M.t * scale + 6;
+  top = Math.min(top, (sr.top - br.top) + (H - M.b) * scale - tip.offsetHeight - 2);
+  tip.style.left = Math.round(left) + 'px';
+  tip.style.top = Math.round(Math.max(0, top)) + 'px';
+}
+
+function plotX(clientX){
+  var svg = document.getElementById('plot'), sr = svg.getBoundingClientRect();
+  if (!sr.width) return null;
+  return (clientX - sr.left) * (W / sr.width);
+}
+
+(function wireHover(){
+  var svg = document.getElementById('plot');
+  if (!svg) return;
+  var move = function(ev){
+    if (!cache) return;
+    var sr = svg.getBoundingClientRect(), scale = sr.width / W;
+    var inside = ev.clientX >= sr.left + (M.l - 16) * scale &&
+                 ev.clientX <= sr.left + (W - M.r + 16) * scale &&
+                 ev.clientY >= sr.top + (M.t - 10) * scale &&
+                 ev.clientY <= sr.top + (H - M.b + 10) * scale;
+    if (!inside){ hideTip(); return; }
+    var ux = plotX(ev.clientX);
+    if (ux === null) hideTip(); else showTipAt(ux);
+  };
+  svg.addEventListener('pointermove', move);
+  svg.addEventListener('pointerdown', move);
+  svg.addEventListener('pointerleave', hideTip);
+  svg.addEventListener('blur', hideTip);
+  // the same readout from the keyboard: step along the titration points
+  svg.addEventListener('keydown', function(ev){
+    if (!cache) return;
+    // a fiftieth of the axis per press, a fifth of that with Shift held
+    var step = (W - M.l - M.r) / (ev.shiftKey ? 250 : 50);
+    if (ev.key === 'ArrowRight' || ev.key === 'ArrowLeft'){
+      var at = hoverAt === null ? (ev.key === 'ArrowRight' ? M.l : W - M.r) : hoverAt;
+      showTipAt(at + (ev.key === 'ArrowRight' ? step : -step));
+      ev.preventDefault();
+    } else if (ev.key === 'Home'){ showTipAt(M.l); ev.preventDefault(); }
+    else if (ev.key === 'End'){ showTipAt(W - M.r); ev.preventDefault(); }
+    else if (ev.key === 'Escape'){ hideTip(); }
+  });
+  window.addEventListener('scroll', hideTip, true);
+  // a tap elsewhere puts the readout away: pointerleave does not fire on touch
+  document.addEventListener('pointerdown', function(ev){
+    if (!svg.contains(ev.target)) hideTip();
+  });
+})();
 
 /* ---------------- readouts ---------------- */
 
