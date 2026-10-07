@@ -566,7 +566,7 @@ var state = {
 
 var SCENARIOS = [
   { key:'ideal', title:'Ideal conditions',
-    blurb:'Protein concentration well below Kd, Ligand concentration well above.',
+    blurb:'Protein concentration well below Kd.',
     apply:function(){
       state.fitSpecific = true; state.fitQuadratic = true; state.fitHill = false; state.scale = 'log';
       // each ligand topped out at 100*Kd and stepped down two-fold, so all three
