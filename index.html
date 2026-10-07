@@ -68,7 +68,7 @@ header{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 18px;
   border-bottom:1px solid var(--line);padding-bottom:6px;margin-bottom:7px}
 
 /* layout */
-.layout{display:grid;grid-template-columns:clamp(492px,32vw,548px) minmax(0,1fr);
+.layout{display:grid;grid-template-columns:clamp(516px,34vw,572px) minmax(0,1fr);
   gap:14px;align-items:stretch}
 .notes{grid-column:1/-1}
 .panel{background:var(--surface);border:1px solid var(--line);border-radius:12px;
@@ -118,9 +118,26 @@ input:focus,select:focus{outline:2px solid var(--ink);outline-offset:-1px;border
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:4px 7px}
 .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px 6px}
 .grid4{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:4px 5px}
-/* six equal columns, each wide enough for a six-character value such as
-   0.0001 or 100000 - any parameter here can take one */
-.grid6{display:grid;grid-template-columns:repeat(6,1fr);gap:1px 5px}
+/* Seven columns: six typed values plus the one derived from them. The six
+   editable ones each need room for a six-character value such as 0.0001 or
+   100000 beside a stepper; the derived cell carries no stepper, so it is
+   given less. Which of [L]min and dilution is derived depends on the mode,
+   so the narrow column moves with it. */
+/* Hill n and Noise SD hold three or four characters where the rest hold six,
+   and a derived cell carries no stepper, so neither takes a full share. */
+.grid7{display:grid;gap:1px 3px}
+/* grid items default to min-width:auto, which lets a long derived value widen
+   its own column at the expense of the fields; the track widths decide instead */
+.grid7>div{min-width:0}
+.grid7.lm{grid-template-columns:1fr 1fr .78fr .88fr 1fr .7fr 1fr}
+.grid7.ld{grid-template-columns:1fr 1fr .82fr .92fr .93fr 1fr 1fr}
+/* the derived value: same box as a field so the row stays level, but read-only
+   and quieter, to read as a consequence of the others rather than an input */
+.lig .dv{font-family:var(--mono);font-size:12px;font-variant-numeric:tabular-nums;
+  color:var(--ink-2);border:1px solid transparent;border-radius:6px;
+  padding:3px 4px;text-align:right;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
+.lig .derived label{color:var(--ink-2)}
 /* replicates rides on the name row */
 .repfield{display:inline-flex;align-items:center;gap:5px;flex:0 0 auto}
 .repfield label{font-size:10.5px;margin:0;white-space:nowrap;color:var(--ink-2)}
@@ -150,6 +167,8 @@ input:focus,select:focus{outline:2px solid var(--ink);outline-offset:-1px;border
 .mslot.off{opacity:.5}
 .hillrow{display:flex;gap:2px;background:var(--surface-2);border:1px solid var(--line);
   border-radius:7px;padding:2px;width:max-content}
+.hillrow.wide{width:100%}
+.hillrow.wide button{flex:1 1 0;padding:3px 4px;text-align:center}
 .hillrow button{font:inherit;font-size:10.5px;color:var(--ink-2);background:none;border:0;
   border-radius:5px;padding:3px 7px;cursor:pointer}
 .hillrow button[aria-pressed="true"]{background:var(--on);color:var(--surface)}
@@ -331,14 +350,21 @@ footer a:focus-visible{outline:2px solid var(--ink);outline-offset:2px;border-ra
       </div>
 
       <p class="sec mt">Experimental parameters</p>
-      <div class="grid2">
+      <div class="grid3">
         <div>
           <label for="unit">Concentration unit</label>
           <select id="unit"><option>pM</option><option selected>nM</option><option>µM</option><option>mM</option></select>
         </div>
         <div>
           <label for="npts">Points per curve</label>
-          <input type="number" id="npts" min="4" max="60" step="1" value="12">
+          <input type="number" id="npts" min="4" max="60" step="1" value="14">
+        </div>
+        <div>
+          <label>Series set by</label>
+          <div class="hillrow wide" role="group" aria-label="Which end of the dilution series you enter">
+            <button id="lowMin" aria-pressed="true">[L]<sub>min</sub></button>
+            <button id="lowDil" aria-pressed="false">dilution</button>
+          </div>
         </div>
       </div>
 
@@ -438,6 +464,7 @@ footer a:focus-visible{outline:2px solid var(--ink);outline-offset:2px;border-ra
       <ul class="terms">
   <li><b>[P]<sub>T</sub></b> — total protein concentration, the same at every point.</li>
   <li><b>[L]<sub>min</sub></b>, <b>[L]<sub>max</sub></b> — first and last total ligand concentrations; points are log-spaced between them.</li>
+  <li><b>dilution</b> — the fold step between neighbouring points, d = ([L]<sub>max</sub>/[L]<sub>min</sub>)<sup>1/(points−1)</sup>. Enter either it or [L]<sub>min</sub>; the other follows.</li>
   <li><b>Noise SD</b> — standard deviation of the Gaussian error added to each replicate, in fraction bound.</li>
   <li><b>K<sub>d</sub></b> — the true dissociation constant the data were simulated from.</li>
   <li><b>EC<sub>50</sub></b> — the true midpoint, K<sub>d</sub> + n·[P]<sub>T</sub>/2. From the settings, not the data, so it has no error.</li>
@@ -493,17 +520,21 @@ var NPTS_MIN = 4, NPTS_MAX = 60;
 var state = {
   preset: null,
   unit: 'nM',
-  points: 12,
+  points: 14,
   scale: 'log',
+  // which end of the series you type: the lowest point, or the fold dilution.
+  // A 14-point, 2-fold series is the usual bench default, so that is where the
+  // panel starts: [L]max is typed and [L]min falls out of it.
+  lowMode: 'dilution',
   fitSpecific: true,
   fitQuadratic: true,
   fitHill: false,
   bmaxSpec: false,
   bmaxQuad: false,
   ligands: [
-    { name:'Ligand A', on:true,  pt:0.05, kd:5,   n:1, min:0.05, max:500,   reps:3, sd:0.02 },
-    { name:'Ligand B', on:false, pt:0.05, kd:50,  n:1, min:0.5,  max:5000,  reps:3, sd:0.02 },
-    { name:'Ligand C', on:false, pt:0.05, kd:500, n:1, min:5,    max:50000, reps:3, sd:0.02 }
+    { name:'Ligand A', on:true,  pt:0.05, kd:5,   n:1, min:0.06104, max:500,   reps:3, sd:0.02 },
+    { name:'Ligand B', on:false, pt:0.05, kd:50,  n:1, min:0.6104,  max:5000,  reps:3, sd:0.02 },
+    { name:'Ligand C', on:false, pt:0.05, kd:500, n:1, min:6.104,   max:50000, reps:3, sd:0.02 }
   ]
 };
 
@@ -512,35 +543,35 @@ var SCENARIOS = [
     blurb:'Protein concentration well below Kd, Ligand concentration well above.',
     apply:function(){
       state.fitSpecific = true; state.fitQuadratic = true; state.fitHill = false; state.scale = 'log';
-      // each ligand titrated over its own Kd/100 to 100*Kd window, so all three
+      // each ligand topped out at 100*Kd and stepped down two-fold, so all three
       // are sampled identically relative to their own affinity
-      state.ligands[0] = { name:'Ligand A', on:true,  pt:0.05, kd:5,   n:1, min:0.05, max:500,   reps:3, sd:0.02 };
-      state.ligands[1] = { name:'Ligand B', on:false, pt:0.05, kd:50,  n:1, min:0.5,  max:5000,  reps:3, sd:0.02 };
-      state.ligands[2] = { name:'Ligand C', on:false, pt:0.05, kd:500, n:1, min:5,    max:50000, reps:3, sd:0.02 };
+      state.ligands[0] = { name:'Ligand A', on:true,  pt:0.05, kd:5,   n:1, min:0.06104, max:500,   reps:3, sd:0.02 };
+      state.ligands[1] = { name:'Ligand B', on:false, pt:0.05, kd:50,  n:1, min:0.6104,  max:5000,  reps:3, sd:0.02 };
+      state.ligands[2] = { name:'Ligand C', on:false, pt:0.05, kd:500, n:1, min:6.104,   max:50000, reps:3, sd:0.02 };
     } },
   { key:'depletion', title:'Ligand depletion',
     blurb:'Protein at 100× Kd eats its own ligand.',
     apply:function(){
       state.fitSpecific = true; state.fitQuadratic = true; state.fitHill = false; state.scale = 'log';
-      state.ligands[0] = { name:'Ligand A', on:true, pt:100, kd:1, n:1, min:0.1, max:1000, reps:3, sd:0.02 };
-      state.ligands[1] = { name:'Ligand B', on:false, pt:100, kd:1, n:1, min:0.1, max:1000, reps:3, sd:0.02 };
-      state.ligands[2] = { name:'Ligand C', on:false, pt:100, kd:1, n:1, min:0.1, max:1000, reps:3, sd:0.02 };
+      state.ligands[0] = { name:'Ligand A', on:true, pt:100, kd:1, n:1, min:0.1221, max:1000, reps:3, sd:0.02 };
+      state.ligands[1] = { name:'Ligand B', on:false, pt:100, kd:1, n:1, min:0.1221, max:1000, reps:3, sd:0.02 };
+      state.ligands[2] = { name:'Ligand C', on:false, pt:100, kd:1, n:1, min:0.1221, max:1000, reps:3, sd:0.02 };
     } },
   { key:'hill', title:'Cooperativity',
     blurb:'Three curves at one Kd with Hill slopes 1, 2 and 0.5.',
     apply:function(){
       state.fitSpecific = true; state.fitQuadratic = false; state.fitHill = true; state.scale = 'log';
-      state.ligands[0] = { name:'n = 1',   on:true, pt:0.05, kd:20, n:1,   min:0.05, max:5000, reps:3, sd:0.02 };
-      state.ligands[1] = { name:'n = 2',   on:true, pt:0.05, kd:20, n:2,   min:0.05, max:5000, reps:3, sd:0.02 };
-      state.ligands[2] = { name:'n = 0.5', on:true, pt:0.05, kd:20, n:0.5, min:0.05, max:5000, reps:3, sd:0.02 };
+      state.ligands[0] = { name:'n = 1',   on:true, pt:0.05, kd:20, n:1,   min:0.6104, max:5000, reps:3, sd:0.02 };
+      state.ligands[1] = { name:'n = 2',   on:true, pt:0.05, kd:20, n:2,   min:0.6104, max:5000, reps:3, sd:0.02 };
+      state.ligands[2] = { name:'n = 0.5', on:true, pt:0.05, kd:20, n:0.5, min:0.6104, max:5000, reps:3, sd:0.02 };
     } },
   { key:'noise', title:'Noise and replicates',
     blurb:'Heavy noise in duplicate.',
     apply:function(){
       state.fitSpecific = true; state.fitQuadratic = true; state.fitHill = false; state.scale = 'log';
-      state.ligands[0] = { name:'Ligand A', on:true, pt:0.05, kd:10, n:1, min:0.1, max:1000, reps:2, sd:0.12 };
-      state.ligands[1] = { name:'Ligand B', on:false, pt:0.05, kd:10, n:1, min:0.1, max:1000, reps:6, sd:0.12 };
-      state.ligands[2] = { name:'Ligand C', on:false, pt:0.05, kd:10, n:1, min:0.1, max:1000, reps:12, sd:0.12 };
+      state.ligands[0] = { name:'Ligand A', on:true, pt:0.05, kd:10, n:1, min:0.1221, max:1000, reps:2, sd:0.12 };
+      state.ligands[1] = { name:'Ligand B', on:false, pt:0.05, kd:10, n:1, min:0.1221, max:1000, reps:6, sd:0.12 };
+      state.ligands[2] = { name:'Ligand C', on:false, pt:0.05, kd:10, n:1, min:0.1221, max:1000, reps:12, sd:0.12 };
     } }
 ];
 
@@ -812,6 +843,10 @@ function fitLigand(L, sim){
 
 /* ---------------- helpers ---------------- */
 
+function sigfig(v, d){
+  if (!isFinite(v)) return '';
+  return String(parseFloat(Number(v).toPrecision(d || 4)));
+}
 function num(v, fb){ return (typeof v === 'number' && isFinite(v)) ? v : fb; }
 function clampInt(v, lo, hi, fb){
   var n = Math.round(num(v, NaN));
@@ -1260,6 +1295,8 @@ function renderChrome(){
   document.getElementById('bsFit').setAttribute('aria-pressed', String(state.bmaxSpec));
   document.getElementById('bqFixed').setAttribute('aria-pressed', String(!state.bmaxQuad));
   document.getElementById('bqFit').setAttribute('aria-pressed', String(state.bmaxQuad));
+  document.getElementById('lowMin').setAttribute('aria-pressed', String(state.lowMode !== 'dilution'));
+  document.getElementById('lowDil').setAttribute('aria-pressed', String(state.lowMode === 'dilution'));
   document.getElementById('scaleLog').setAttribute('aria-pressed', String(state.scale === 'log'));
   document.getElementById('scaleLin').setAttribute('aria-pressed', String(state.scale !== 'log'));
 }
@@ -1282,6 +1319,40 @@ function renderScenarios(){
   });
 }
 
+// A log-spaced series of np points from lo to hi steps by a constant factor:
+// d^(np-1) = hi/lo. So the lowest point and the fold dilution are two ways of
+// saying the same thing, and either one gives the other.
+function steps(){ return Math.max(1, clampInt(state.points, NPTS_MIN, NPTS_MAX, 12) - 1); }
+
+function dilutionOf(L){
+  var lo = Math.max(num(L.min, 0), 1e-12), hi = Math.max(num(L.max, lo), lo);
+  if (hi <= lo) return 1;
+  return Math.pow(hi / lo, 1 / steps());
+}
+function minFromDilution(L, d){
+  var hi = Math.max(num(L.max, 1), 1e-12);
+  if (!isFinite(d) || d <= 1) return hi;
+  // rounded to the precision the panel shows, so the typed field and the
+  // derived cell never disagree about the same number
+  return parseFloat((hi / Math.pow(d, steps())).toPrecision(4));
+}
+
+// Four significant figures, and out at the extremes an exponent rather than a
+// run of zeros, so a derived value always fits the cell it is shown in.
+function compact(v){
+  if (!isFinite(v)) return '';
+  var a = Math.abs(v);
+  if (a !== 0 && (a < 1e-3 || a >= 1e5)) return Number(v).toExponential(2).replace('e+', 'e');
+  return sigfig(v, 4);
+}
+
+// A read-only partner to fieldRow: the other way of saying what the user typed.
+function derivedRow(i, f, label, value, title){
+  return '<div class="derived"><label>' + label + '</label>' +
+    '<div class="dv" data-dv="' + f + '" data-i="' + i + '" title="' + title + '">' +
+    value + '</div></div>';
+}
+
 function fieldRow(i, f, label, attrs){
   return '<div><label for="' + f + i + '">' + label + '</label>' +
     '<input type="number" id="' + f + i + '" data-f="' + f + '" data-i="' + i + '" ' + attrs + '></div>';
@@ -1302,12 +1373,23 @@ function renderLigands(){
         '" min="1" max="12" step="1"></span>' +
       '<label class="sw"><input type="checkbox" data-f="on" data-i="' + i + '"' + (L.on ? ' checked' : '') +
         ' aria-label="Include ' + esc(L.name) + '"><span></span></label></div>';
-    var body = '<div class="grid6">' +
+    var dil = state.lowMode === 'dilution';
+    var body = '<div class="grid7 ' + (dil ? 'ld' : 'lm') + '">' +
         fieldRow(i, 'pt', '[P]<sub>T</sub>', 'value="' + L.pt + '" min="0" step="any"') +
         fieldRow(i, 'kd', 'K<sub>d</sub>', 'value="' + L.kd + '" min="0" step="any"') +
         fieldRow(i, 'n', 'Hill n', 'value="' + L.n + '" min="0.2" max="6" step="0.1"') +
         fieldRow(i, 'sd', 'Noise SD', 'value="' + L.sd + '" min="0" step="0.01"') +
-        fieldRow(i, 'min', '[L]<sub>min</sub>', 'value="' + L.min + '" min="0" step="any"') +
+        (dil
+          ? derivedRow(i, 'min', '[L]<sub>min</sub>', compact(L.min),
+              'Lowest concentration in the series, set by the fold dilution, ' +
+              '[L]max and the number of points')
+          : fieldRow(i, 'min', '[L]<sub>min</sub>', 'value="' + L.min + '" min="0" step="any"')) +
+        (dil
+          ? fieldRow(i, 'dil', 'dilution', 'value="' + sigfig(dilutionOf(L), 4) +
+              '" min="1.001" step="any"')
+          : derivedRow(i, 'dil', 'dilution', compact(dilutionOf(L)),
+              'Fold step between neighbouring points, set by [L]min, [L]max ' +
+              'and the number of points')) +
         fieldRow(i, 'max', '[L]<sub>max</sub>', 'value="' + L.max + '" min="0" step="any"') +
       '</div>';
     return '<div class="lig ' + (L.on ? 'on' : 'off') + '">' + head + body + '</div>';
@@ -1328,13 +1410,33 @@ function renderLigands(){
       var i = +el.getAttribute('data-i'), f = el.getAttribute('data-f'), L = state.ligands[i];
       if (f === 'on'){ L.on = el.checked; reseed(); renderAll(); return; }
       if (f === 'name'){ L.name = el.value || ('Ligand ' + 'ABC'[i]); redraw(); return; }
+      if (f === 'dil'){
+        var d = parseFloat(el.value);
+        if (!isFinite(d) || d <= 1) return;     // let them keep typing
+        L.min = minFromDilution(L, d);
+        touched(); reseed(); syncDerived(); redraw();
+        return;
+      }
       if (f === 'n') L.n = Math.max(0.2, Math.min(6, parseFloat(el.value) || 1));
       else if (f === 'reps') L.reps = Math.max(1, Math.min(12, Math.round(parseFloat(el.value) || 1)));
       else L[f] = parseFloat(el.value);
       touched();
       reseed();
+      syncDerived();
       redraw();
     });
+  });
+}
+
+// [L]min, [L]max and the number of points fix the fold dilution, so editing any
+// of them moves the derived cell. Rewriting just that cell leaves the field the
+// user is typing in - and its cursor - alone.
+function syncDerived(){
+  document.querySelectorAll('.lig .dv').forEach(function(el){
+    var L = state.ligands[+el.getAttribute('data-i')];
+    if (!L) return;
+    el.textContent = el.getAttribute('data-dv') === 'dil'
+      ? compact(dilutionOf(L)) : compact(L.min);
   });
 }
 
@@ -1418,15 +1520,13 @@ document.getElementById('npts').addEventListener('input', function(){
   // a clean integer, and snap the field back on blur
   var n = clampInt(parseFloat(this.value), NPTS_MIN, NPTS_MAX, NaN);
   if (!isFinite(n) || n !== Math.round(parseFloat(this.value))) return;
-  state.points = n;
-  touched(); reseed(); redraw();
+  setPoints(n);
 });
 document.getElementById('npts').addEventListener('blur', function(){
   var n = clampInt(parseFloat(this.value), NPTS_MIN, NPTS_MAX, state.points);
   this.value = n;
   if (n === state.points) return;
-  state.points = n;
-  touched(); reseed(); redraw();
+  setPoints(n);
 });
 // Repeat the experiment: same settings, a new draw of the noise.
 document.getElementById('resim').addEventListener('click', function(){
@@ -1434,6 +1534,25 @@ document.getElementById('resim').addEventListener('click', function(){
   redraw();
   said('resimulated');
 });
+
+// In dilution mode the fold step is what the user set, so changing the number
+// of points moves the bottom of the series rather than the dilution.
+function setPoints(n){
+  var keep = state.lowMode === 'dilution'
+    ? state.ligands.map(function(L){ return dilutionOf(L); }) : null;
+  state.points = n;
+  if (keep) state.ligands.forEach(function(L, i){ L.min = minFromDilution(L, keep[i]); });
+  touched(); reseed();
+  if (keep) renderAll(); else { syncDerived(); redraw(); }
+}
+
+function setLowMode(m){
+  if (state.lowMode === m) return;
+  state.lowMode = m;
+  renderAll();
+}
+document.getElementById('lowMin').addEventListener('click', function(){ setLowMode('min'); });
+document.getElementById('lowDil').addEventListener('click', function(){ setLowMode('dilution'); });
 
 document.getElementById('scaleLog').addEventListener('click', function(){ state.scale = 'log'; redraw(); });
 document.getElementById('scaleLin').addEventListener('click', function(){ state.scale = 'linear'; redraw(); });
