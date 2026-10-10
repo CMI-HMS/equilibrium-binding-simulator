@@ -344,6 +344,9 @@ th.gl,td.gl{border-left:1px solid var(--line)}
 footer{margin-top:24px;padding-top:14px;border-top:1px solid var(--line);
   font-size:12px;color:var(--muted)}
 footer p{margin:0}
+/* credit on the left, the tool note on the right; they stack on a phone */
+footer{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:6px 24px}
+.madewith{margin-top:10px;font-size:12px;color:var(--muted);margin-left:auto}
 .credit{margin-top:10px;color:var(--ink-2);font-size:12.5px}
 .credit b{color:var(--ink);font-weight:600}
 footer a{color:inherit;text-decoration:underline;text-underline-offset:2px;
@@ -530,6 +533,7 @@ footer a:focus-visible{outline:2px solid var(--ink);outline-offset:2px;border-ra
 
   <footer>
     <p class="credit"><b>Kelly Arnett</b> · <a href="https://cmi.hms.harvard.edu/" target="_blank" rel="noopener noreferrer">Center for Macromolecular Interactions (CMI)</a>, Harvard Medical School</p>
+    <p class="madewith">Built with Claude Opus 5 (Anthropic)</p>
   </footer>
 </div>
 
